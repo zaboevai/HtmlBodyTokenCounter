@@ -30,7 +30,7 @@ func main() {
 
 	go ParseStdin(inputChanel)
 	go ValidateUrls(inputChanel, urlsChanel)
-	go CountTokenFromUrls(token, urlsChanel, resultChanel)
+	go CountTokenFromUrls(token, goRoutineLimit, urlsChanel, resultChanel)
 	PrintResult(resultChanel)
 
 }
@@ -56,15 +56,26 @@ func ValidateUrls(inputChanel chan string, urlsChanel chan string) {
 	close(urlsChanel)
 }
 
-func CountTokenFromUrls(token string, urlsChanel chan string, resultChanel chan Result) {
+func CountTokenFromUrls(token string, goRoutineLimit int, urlsChanel chan string, resultChanel chan Result) {
 	var (
 		isDoneChanel = make(chan bool)
 		workers      = 0
+		limit        = make(chan int, goRoutineLimit)
 	)
 
 	for url_ := range urlsChanel {
+		limit <- 1
 		workers++
-		go countTokenFromUrl(url_, token, resultChanel, isDoneChanel)
+		go func(url string) {
+			responseBody := sendRequest(url)
+			if responseBody == "" {
+				resultChanel <- Result{url, token, 0}
+			}
+			count := strings.Count(responseBody, token)
+			resultChanel <- Result{url, token, count}
+			<-limit
+			isDoneChanel <- true
+		}(url_)
 	}
 
 	// Дожидаюсь завершения всех заданий
@@ -88,16 +99,6 @@ func PrintResult(resultChanel chan Result) {
 		sum += result.tokenCount
 	}
 	fmt.Println("Total:", sum)
-}
-
-func countTokenFromUrl(url string, token string, resultChanel chan Result, done chan bool) {
-	responseBody := sendRequest(url)
-	if responseBody == "" {
-		resultChanel <- Result{url, token, 0}
-	}
-	count := strings.Count(responseBody, token)
-	resultChanel <- Result{url, token, count}
-	done <- true
 }
 
 func sendRequest(url string) string {
